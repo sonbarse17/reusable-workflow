@@ -18,7 +18,7 @@ on:
       docker_registry:
         required: false
         type: string
-        default: 'ghcr.io'
+        default: 'docker.io'
       docker_image_name:
         required: false
         type: string
@@ -31,6 +31,10 @@ on:
         type: boolean
         default: true
       enable_iac_scan:
+        required: false
+        type: boolean
+        default: true
+      enable_secret_scan:
         required: false
         type: boolean
         default: true
@@ -51,6 +55,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secret-scan:
+    if: ${{ inputs.enable_secret_scan }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks Secret Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-and-test:
     runs-on: ubuntu-latest
     steps:
