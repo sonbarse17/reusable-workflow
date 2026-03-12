@@ -50,6 +50,14 @@ on:
         required: false
         type: string
         default: 'default'
+      enable_dast_scan:
+        required: false
+        type: boolean
+        default: false
+      dast_target_url:
+        required: false
+        type: string
+        default: ''
     secrets:
       REGISTRY_USERNAME:
         required: false
@@ -257,3 +265,28 @@ jobs:
           
           # Apply manifests from the specified directory
           kubectl apply -f ${{ inputs.k8s_manifest_dir }} -n ${{ inputs.k8s_namespace }}
+
+  dast-scan:
+    needs: [devsecops-pipeline, deploy-to-k8s]
+    if: |
+      always() && 
+      inputs.enable_dast_scan && 
+      needs.devsecops-pipeline.result == 'success' &&
+      (needs.deploy-to-k8s.result == 'success' || needs.deploy-to-k8s.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ inputs.dast_target_url }}
+          fail_action: false
+          
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-scan-report
+          path: report_html.html
+          if-no-files-found: ignore
