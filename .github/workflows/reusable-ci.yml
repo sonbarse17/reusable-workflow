@@ -55,9 +55,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  secret-scan:
-    if: ${{ inputs.enable_secret_scan }}
+  devsecops-pipeline:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,17 +69,11 @@ jobs:
           fetch-depth: 0
 
       - name: Gitleaks Secret Scan
+        if: ${{ inputs.enable_secret_scan }}
         uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -102,57 +100,25 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
-  security-scan:
-    needs: build-and-test
-    if: ${{ inputs.enable_code_scanning }}
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Initialize CodeQL
+        if: ${{ inputs.enable_code_scanning }}
         uses: github/codeql-action/init@v3
         with:
           languages: python
 
       - name: Perform CodeQL Analysis
+        if: ${{ inputs.enable_code_scanning }}
         uses: github/codeql-action/analyze@v3
 
-  sonar-scan:
-    needs: build-and-test
-    if: ${{ inputs.enable_sonar_scan }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download coverage report
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-        continue-on-error: true
-
       - name: SonarQube Scan
+        if: ${{ inputs.enable_sonar_scan }}
         uses: SonarSource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-  owasp-dependency-check:
-    needs: build-and-test
-    if: ${{ inputs.enable_owasp_scan }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: OWASP Dependency Check
+        if: ${{ inputs.enable_owasp_scan }}
         uses: dependency-check/Dependency-Check_Action@main
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
@@ -165,24 +131,14 @@ jobs:
             --nvdApiKey ${{ secrets.NVD_API_KEY }}
 
       - name: Upload OWASP Dependency Check Report
+        if: ${{ inputs.enable_owasp_scan }}
         uses: actions/upload-artifact@v4
         with:
           name: owasp-dependency-check-report
           path: reports
 
-  iac-scan:
-    needs: build-and-test
-    if: ${{ inputs.enable_iac_scan }}
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Run Checkov Scan
+        if: ${{ inputs.enable_iac_scan }}
         uses: bridgecrewio/checkov-action@master
         with:
           directory: .
@@ -192,12 +148,14 @@ jobs:
           output_file_path: console,checkov-results.sarif
 
       - name: Upload Checkov Scan Results
+        if: ${{ inputs.enable_iac_scan }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
           category: checkov-iac-scanning
 
       - name: Run tfsec Scan
+        if: ${{ inputs.enable_iac_scan }}
         uses: aquasecurity/tfsec-action@master
         with:
           soft_fail: true
@@ -205,30 +163,22 @@ jobs:
           out: tfsec-results.sarif
 
       - name: Upload tfsec Scan Results
+        if: ${{ inputs.enable_iac_scan }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: tfsec-results.sarif
           category: tfsec-iac-scanning
 
-  docker-build-push:
-    needs: build-and-test
-    if: ${{ inputs.enable_docker_build }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      security-events: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Set up QEMU
+        if: ${{ inputs.enable_docker_build }}
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: ${{ inputs.enable_docker_build }}
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Registry
+        if: ${{ inputs.enable_docker_build }}
         uses: docker/login-action@v3
         with:
           registry: ${{ inputs.docker_registry }}
@@ -237,6 +187,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
+        if: ${{ inputs.enable_docker_build }}
         uses: docker/metadata-action@v5
         with:
           images: ${{ inputs.docker_registry }}/${{ inputs.docker_image_name || github.repository }}
@@ -245,6 +196,7 @@ jobs:
             type=sha,format=long
 
       - name: Build and Push Image
+        if: ${{ inputs.enable_docker_build }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -255,6 +207,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run Trivy Vulnerability Scanner
+        if: ${{ inputs.enable_docker_build }}
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ inputs.docker_registry }}/${{ inputs.docker_image_name || github.repository }}:sha-${{ github.sha }}
@@ -263,6 +216,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Upload Trivy Scan Results
+        if: ${{ inputs.enable_docker_build }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
