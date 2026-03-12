@@ -38,6 +38,18 @@ on:
         required: false
         type: boolean
         default: true
+      enable_k8s_deploy:
+        required: false
+        type: boolean
+        default: false
+      k8s_manifest_dir:
+        required: false
+        type: string
+        default: 'k8s/'
+      k8s_namespace:
+        required: false
+        type: string
+        default: 'default'
     secrets:
       REGISTRY_USERNAME:
         required: false
@@ -48,6 +60,8 @@ on:
       SONAR_HOST_URL:
         required: false
       NVD_API_KEY:
+        required: false
+      KUBECONFIG:
         required: false
 
 concurrency:
@@ -221,3 +235,25 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: docker-image-scanning
+
+  deploy-to-k8s:
+    needs: devsecops-pipeline
+    if: ${{ inputs.enable_k8s_deploy }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Apply Kubernetes manifests
+        run: |
+          # Create namespace if it doesn't exist just in case
+          kubectl create namespace ${{ inputs.k8s_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply manifests from the specified directory
+          kubectl apply -f ${{ inputs.k8s_manifest_dir }} -n ${{ inputs.k8s_namespace }}
